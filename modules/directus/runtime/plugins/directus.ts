@@ -8,9 +8,24 @@ export default defineNuxtPlugin((nuxtApp) => {
 	const route = useRoute();
 	const config = useRuntimeConfig();
 
-	const directus = createDirectus<Schema>(joinURL(config.public.siteUrl, '/api/proxy'), { globals: { fetch: $fetch } })
+	// During SSR (Cloudflare Worker), call Directus directly to avoid self-referential
+	// subrequests that fail silently. On the client, use the proxy to avoid CORS issues.
+	const baseUrl = import.meta.server
+		? config.public.directus.rest.baseUrl // e.g. https://os.puraluce.studio
+		: joinURL(config.public.siteUrl, '/api/proxy');
+
+	const directus = createDirectus<Schema>(baseUrl, { globals: { fetch: $fetch } })
 		.with(authentication('session'))
 		.with(rest());
+
+	// During SSR, authenticate with the server token so Directus returns data
+	// that may require authentication (e.g. draft content, restricted collections).
+	if (import.meta.server) {
+		const serverToken = (config as any).directusServerToken;
+		if (serverToken) {
+			directus.setToken(serverToken);
+		}
+	}
 
 	// ** Live Preview Bits **
 	// Check if we are in preview mode
